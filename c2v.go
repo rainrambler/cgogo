@@ -18,6 +18,15 @@ func in_builtin_type_names(tname string) bool {
 
 var builtin_global_names = []string{"sys_nerr", "sys_errlist", "suboptarg"}
 
+func in_builtin_global_names(tname string) bool {
+	for _, v := range builtin_global_names {
+		if v == tname {
+			return true
+		}
+	}
+	return false
+}
+
 var tabs = []string{"", "\t", "\t\t", "\t\t\t", "\t\t\t\t", "\t\t\t\t\t"}
 
 var cur_dir string
@@ -252,10 +261,7 @@ func ( c2v *C2V) add_file(ast_path string, outv string, c_file string) {
 		vprintln("failed to read ast file "+ast_path+": ${err}")
 		panic(err)
 	}
-	c2v.tree = json.decode(Node, ast_txt) or {
-		vprintln("failed to decode ast file "+ast_path+": ${err}")
-		panic(err)
-	}
+	c2v.tree = json.decode(Node, ast_txt)
 
 	c2v.outv = outv
 	c2v.c_file_contents = c_file_contents
@@ -264,10 +270,7 @@ func ( c2v *C2V) add_file(ast_path string, outv string, c_file string) {
 	if c2v.is_wrapper {
 		// unsupported by cgogo
 	} else {
-		c2v.out_file = os.create(c2v.outv) or {
-			vprintln("cant create")
-			panic(err)
-		}
+		c2v.out_file = os.create(c2v.outv)
 	}
 	c2v.genln("[translated]")
 	// Predeclared identifiers
@@ -308,13 +311,10 @@ func line_is_source(val string) bool {
 	return val.ends_with(".c")
 }
 
-func ( c *C2V) fn_call( node Node) {
-	expr := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
-	c.expr(expr) // this is `fn_name(`
-	// Clean up macos builtin fn names
+func ( c *C2V) func_call( node Node) {
+	expr := node.try_get_next_child() 
+	c.expr(expr) // this is `func_name(`
+	// Clean up macos builtin func names
 	// $if macos
 	is_memcpy := c.cur_out_line.contains("__builtin___memcpy_chk")
 	is_memmove := c.cur_out_line.contains("__builtin___memmove_chk")
@@ -334,15 +334,19 @@ func ( c *C2V) fn_call( node Node) {
 	}
 	// Drop last argument if we have memcpy_chk
 	is_m := is_memcpy || is_memmove || is_memset
-	len := if is_m { 3 } else { node.inner.len - 1 }
+	len0 := 0
+	if is_m 	{ 
+	len0 = 3 } else { 
+	len0 =node.inner.len - 1 
+	}
 	c.gen("(")
 	for i, arg := range node.inner {
-		if is_m && i > len {
+		if is_m && i > len0 {
 			break
 		}
 		if i > 0 {
 			c.expr(arg)
-			if i < len {
+			if i < len0 {
 				c.gen(", ")
 			}
 		}
@@ -350,11 +354,11 @@ func ( c *C2V) fn_call( node Node) {
 	c.gen(")")
 }
 
-func ( c *C2V) fn_decl( node Node, gen_types string) {
+func ( c *C2V) func_decl( node Node, gen_types string) {
 	vprintln("1FN DECL name="+node.name+" cur_file="+c.cur_file+"")
 	c.inside_main = false
 	if node.location.file.contains("usr/include") {
-		vprintln("\nskipping fn:")
+		vprintln("\nskipping func:")
 		vprintln("")
 		return
 	}
@@ -387,7 +391,7 @@ func ( c *C2V) fn_decl( node Node, gen_types string) {
 	}
 	if !c.contains_word(name) {
 		vprintln("RRRR ${name} not here, skipping")
-		// This fn is not found in current .c file, means that it was only
+		// This func is not found in current .c file, means that it was only
 		// in the include file, so it"s declared and used in some other .c file,
 		// no need to genenerate it here.
 		// TODO perf right now this searches an entire .c file for each global.
@@ -421,8 +425,8 @@ func ( c *C2V) fn_decl( node Node, gen_types string) {
 		vprintln("\nFN DECL name="+name+" typ="+typ+"")
 	}
 
-	// Build fn args
-	params := c.fn_params( node)
+	// Build func args
+	params := c.func_params( node)
 
 	str_args := "" 
 	if name == "main" { 
@@ -432,7 +436,7 @@ func ( c *C2V) fn_decl( node Node, gen_types string) {
 	if !no_stmts || c.is_wrapper {
 		c_name := name + gen_types
 		if c.is_wrapper {
-			//c.genln("fn C.${c_name}(${str_args}) ${typ}\n")
+			//c.genln("func C.${c_name}(${str_args}) ${typ}\n")
 		}
 		v_name := name.to_lower()
 		if v_name != c_name && !c.is_wrapper {
@@ -440,15 +444,12 @@ func ( c *C2V) fn_decl( node Node, gen_types string) {
 		}
 		if c.is_wrapper {
 		} else {
-			c.genln("fn ${v_name}(${str_args}) ${typ} {")
+			c.genln("func ${v_name}(${str_args}) ${typ} {")
 		}
 
 		if !c.is_wrapper {
 			// For wrapper generation just generate function definitions without bodies
-			 stmts := node.try_get_next_child_of_kind(.compound_stmt) or {
-				println(err)
-				bad_node
-			}
+			 stmts := node.try_get_next_child_of_kind(compound_stmt)
 
 			c.statements( stmts)
 		} else if c.is_wrapper {
@@ -460,26 +461,23 @@ func ( c *C2V) fn_decl( node Node, gen_types string) {
 			// example:
 			//
 			// [c: "P_TryMove"]
-			// fn p_trymove(thing &Mobj_t, x int, y int) bool
+			// func p_trymove(thing &Mobj_t, x int, y int) bool
 			//
 			// Now every time `p_trymove` is called, `P_TryMove` will be generated instead.
 			c.genln(`[c:"${name}"]`)
 		}
 		name = lower
-		c.genln("fn ${name}(${str_args}) ${typ}")
+		c.genln("func ${name}(${str_args}) ${typ}")
 	}
 	c.genln("")
 	vprintln("END OF FN DECL ast line=${c.line_i}")
 }
 
-fn (c *C2V) fn_params(mut node Node) []string {
-	mut str_args := []string{cap: 5}
-	nr_params := node.count_children_of_kind(.parm_var_decl)
+func (c *C2V) func_params( node Node) []string {
+	 str_args := []string{cap: 5}
+	nr_params := node.count_children_of_kind(parm_var_decl)
 	for i := 0; i < nr_params; i++ {
-		param := node.try_get_next_child_of_kind(.parm_var_decl) or {
-			println(err)
-			continue
-		}
+		param := node.try_get_next_child_of_kind(parm_var_decl)
 
 		arg_typ := convert_type(param.ast_type.qualified)
 		if arg_typ.name.contains("...") {
@@ -492,15 +490,15 @@ fn (c *C2V) fn_params(mut node Node) []string {
 }
 
 // converts a C type to a V type
-fn convert_type(typ_ string) Type {
-	mut typ := typ_
+func convert_type(typ_ string) Type {
+	 typ := typ_
 	if true || typ.contains("type_t") {
 		vprintln(`\nconvert_type("${typ}")`)
 	}
 
 	if typ.contains("__va_list_tag *") {
 		return Type{
-			name: "va_list"
+			name: "va_list",
 		}
 	}
 	// TODO DOOM hack
@@ -514,38 +512,38 @@ fn convert_type(typ_ string) Type {
 	typ = typ.replace("std::", "")
 	if typ == "char **" {
 		return Type{
-			name: "&&u8"
+			name: "&&u8",
 		}
 	}
 	if typ == "void *" {
 		return Type{
-			name: "voidptr"
+			name: "voidptr",
 		}
 	} else if typ == "void **" {
 		return Type{
-			name: "&voidptr"
+			name: "&voidptr",
 		}
 	} else if typ.starts_with("void *[") {
 		return Type{
-			name: "[" + typ.substr("void *[".len, typ.len - 1) + "]voidptr"
+			name: "[" + typ.substr("void *[".len, typ.len - 1) + "]voidptr",
 		}
 	}
 
 	// enum
 	if typ.starts_with("enum ") {
 		return Type{
-			name: typ.substr("enum ".len, typ.len).capitalize()
-			is_const: is_const
+			name: typ.substr("enum ".len, typ.len).capitalize(),
+			is_const: is_const,
 		}
 	}
 
 	// int[3]
-	mut idx := ""
+	 idx := ""
 	if typ.contains("[") && typ.contains("]") {
 		if true {
-			pos := typ.index("[") or { panic("no [ in conver_type(${typ})") }
-			idx = typ[pos..]
-			typ = typ[..pos]
+			pos := typ.index("[")
+			idx = typ[pos:]
+			typ = typ[:pos]
 		} else {
 			idx = typ.after("[")
 			idx = "[" + idx
@@ -555,23 +553,26 @@ fn convert_type(typ_ string) Type {
 	// leveldb::DB
 	if typ.contains("::") {
 		typ = typ.after("::")
-	}
-	// boolean:boolean
-	else if typ.contains(":") {
+	}	else if typ.contains(":") {
+		// boolean:boolean
 		typ = typ.all_before(":")
 	}
 	typ = typ.replace(" void *", "voidptr")
 
 	// char*** => ***char
-	mut base := typ.trim_space().replace_each(["struct ", ""]) //, "signed ", ""])
+	 base := typ.trim_space()
+	base = strings.ReplaceAll("struct ", "") //, "signed ", ""])???
 	if base.starts_with("signed ") {
 		// "signed char" == "char", so just ignore "signed "
-		base = base["signed ".len..]
+		// TODO ???
+		//base = base["signed ".len..]
 	}
 	if base.ends_with("*") {
 		base = base.before(" *")
 	}
 
+	/*
+	// TODO ???
 	base = match base {
 		"long long" {
 			"i64"
@@ -674,22 +675,22 @@ fn convert_type(typ_ string) Type {
 			trim_underscores(base.capitalize())
 		}
 	}
-	mut amps := ""
+	*/
+	 amps := ""
 
 	if typ.ends_with("*") {
-		star_pos := typ.index("*") or { -1 }
+		star_pos := typ.index("*")
 
-		nr_stars := typ[star_pos..].len
+		nr_stars := len(typ[star_pos:])
 		amps = strings.repeat(`&`, nr_stars)
 		typ = amps + base
-	}
-	// fn type
+	}	else if typ.contains("(*)") {
+		// func type
 	// int (*)(void *, int, char **, char **)
-	// fn (voidptr, int, *byteptr, *byteptr) int
-	else if typ.contains("(*)") {
+	// func (voidptr, int, *byteptr, *byteptr) int
 		ret_typ := convert_type(typ.all_before("("))
-		mut s := "fn ("
-		// move fn to the right place
+		 s := "func ("
+		// move func to the right place
 		typ = typ.replace("(*)", " ")
 		// handle each arg
 		sargs := typ.find_between("(", ")")
@@ -707,14 +708,14 @@ fn convert_type(typ_ string) Type {
 		} else {
 			typ = "${s}) ${ret_typ.name}"
 		}
-		// C allows having fn(void) instead of fn()
+		// C allows having func(void) instead of func()
 		typ = typ.replace("(void)", "()")
 	} else {
 		typ = base
 	}
 	// User & => &User
 	if typ.ends_with(" &") {
-		typ = typ[..typ.len - 2]
+		typ = typ[:typ.len - 2]
 		base = typ
 		typ = "&" + typ
 	}
@@ -728,16 +729,16 @@ fn convert_type(typ_ string) Type {
 
 	name := idx + typ
 	return Type{
-		name: name
-		is_const: is_const
+		name: name,
+		is_const: is_const,
 	}
 }
 
 // |-RecordDecl 0x7fd7c302c560 <a.c:3:1, line:5:1> line:3:8 struct User definition
-fn (mut c C2V) record_decl(node &Node) {
+func ( c *C2V) record_decl(node *Node) {
 	vprintln(`record_decl("${node.name}")`)
 	// Skip empty structs (extern or forward decls)
-	if node.kindof(.record_decl) && node.inner.len == 0 {
+	if node.kindof(record_decl) && node.inner.len == 0 {
 		return
 	}
 	 name := node.name
@@ -750,7 +751,7 @@ fn (mut c C2V) record_decl(node &Node) {
 	if c.tree.inner.len > c.node_i + 1 {
 		next_node := c.tree.inner[c.node_i + 1]
 
-		if next_node.kind == .typedef_decl {
+		if next_node.kind == typedef_decl {
 			if c.is_verbose {
 				c.genln("// typedef struct")
 			}
@@ -769,10 +770,10 @@ fn (mut c C2V) record_decl(node &Node) {
 	if c.is_verbose {
 		c.genln(`// struct decl name="${name}"`)
 	}
-	if name in c.types {
+	if in_c_types(name) {
 		return
 	}
-	if name !in ["struct", "union"] {
+	if (name != "struct") && (name != "union"){
 		c.types << name
 		name = capitalize_type(name)
 		if node.tags.contains("union") {
@@ -781,9 +782,9 @@ fn (mut c C2V) record_decl(node &Node) {
 			c.genln("struct ${name} { ")
 		}
 	}
-	for field in node.inner {
+	for _,field := range node.inner {
 		// There may be comments, skip them
-		if field.kind != .field_decl {
+		if field.kind != field_decl {
 			continue
 		}
 		field_type := convert_type(field.ast_type.qualified)
@@ -797,7 +798,7 @@ fn (mut c C2V) record_decl(node &Node) {
 		}
 		*/
 		if field_type.name.ends_with("_s") { // TODO doom _t _s hack, remove
-			n := field_type.name[..field_type.name.len - 2] + "_t"
+			n := field_type.name[:field_type.name.len - 2] + "_t"
 			c.genln("\t${field_name} ${n}")
 		} else {
 			c.genln("\t${field_name} ${field_type.name}")
@@ -806,9 +807,29 @@ fn (mut c C2V) record_decl(node &Node) {
 	c.genln("}")
 }
 
+func ( c *C2V) in_c_types(s string) bool {
+	for _, v :=range c.types {
+		if v == s {
+			return true
+		}
+	}
+	
+	return false
+}
+
+func ( c *C2V) in_c_enums(s string) bool {
+	for _, v :=range c.enums {
+		if v == s {
+			return true
+		}
+	}
+	
+	return false
+}
+
 // Typedef node goes after struct enum, but we need to parse it first, so that "type name { " is
 // generated first
-fn ( c C2V) typedef_decl(node &Node) {
+func ( c *C2V) typedef_decl(node *Node) {
 	 typ := node.ast_type.qualified
 	// just a single line typedef: (alias)
 	// typedef sha1_context_t sha1_context_s ;
@@ -826,9 +847,8 @@ fn ( c C2V) typedef_decl(node &Node) {
 		if typ.contains("(*)") {
 			tt := convert_type(typ)
 			typ = tt.name
-		}
-		// Struct types have junk before spaces
-		else {
+		}		else {
+			// Struct types have junk before spaces
 			alias_name = alias_name.all_after(" ")
 			tt := convert_type(typ)
 			typ = tt.name
@@ -837,20 +857,19 @@ fn ( c C2V) typedef_decl(node &Node) {
 			// Skip internal stuff like __builtin_ms_va_list
 			return
 		}
-		if alias_name in c.types || alias_name in c.enums {
+		if c.in_c_types(alias_name)  || c.in_c_enums(alias_name) {
 			// This means that this is a struct/enum typedef that has already been defined.
 			return
 		}
-		if typ in c.enums {
+		if c.in_c_enums(typ) {
 			return
 		}
-		c.types << alias_name
+		c.types  = append(c.types,  alias_name)
 		 cgen_alias := typ
 		if cgen_alias.starts_with("_") {
 			cgen_alias = trim_underscores(typ)
 		}
-		if typ !in ["int", "i8", "i16", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "usize", "isize", "bool", "void", "voidptr"]
-			&& !typ.starts_with("fn (") {
+		if !is_ptr_size(typ)			&& !typ.starts_with("func (") {
 			// TODO handle this better
 			cgen_alias = cgen_alias.capitalize()
 		}
@@ -869,8 +888,18 @@ fn ( c C2V) typedef_decl(node &Node) {
 	}
 }
 
+func is_ptr_size(s string) bool {
+	arr := []string{"int", "i8", "i16", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "usize", "isize", "bool", "void", "voidptr"}
+	for _, v := range arr {
+		if s == v {
+			return true
+		}
+		}
+	return false
+}
+
 // this calls typedef_decl() above
-fn ( c C2V) parse_next_typedef() bool {
+func ( c *C2V) parse_next_typedef() bool {
 	// Hack: typedef with the actual enum name is next, parse it and generate "enum NAME {" first
 	/*
 	XTODO
@@ -884,12 +913,22 @@ fn ( c C2V) parse_next_typedef() bool {
 	return false
 }
 
-fn ( c C2V) enum_decl( node Node) {
+func ( c *C2V) in_consts(s string) bool {
+	for _, v :=range c.consts {
+		if v == s {
+			return true
+		}
+	}
+	
+	return false
+}
+
+func ( c *C2V) enum_decl( node Node) {
 	// Hack: typedef with the actual enum name is next, parse it and generate "enum NAME {" first
 	 enum_name := node.name //""
 	if c.tree.inner.len > c.node_i + 1 {
 		next_node := c.tree.inner[c.node_i + 1]
-		if next_node.kind == .typedef_decl {
+		if next_node.kind == typedef_decl {
 			enum_name = next_node.name
 		}
 	}
@@ -901,21 +940,21 @@ fn ( c C2V) enum_decl( node Node) {
 		c.genln("\nconst ( // empty enum")
 	} else {
 		enum_name = enum_name.capitalize().replace("Enum ", "")
-		if enum_name in c.enums {
+		if c.in_c_enums(enum_name) {
 			return
 		}
 
 		c.genln("enum ${enum_name} {")
 	}
 	 vals := c.enum_vals[enum_name]
-	for i,  child in node.inner {
+	for i,  child := range node.inner {
 		name := filter_name(child.name.to_lower())
 		vals << name
 		 has_anon_generated := false
 		// empty enum means it"s just a list of #define"ed consts
 		if enum_name == "" {
-			if !name.starts_with("_") && name !in c.consts {
-				c.consts << name
+			if !name.starts_with("_") && c.in_consts(name) {
+				c.consts  = append(c.consts, name)
 				c.gen("\t${name}")
 				has_anon_generated = true
 			}
@@ -923,18 +962,12 @@ fn ( c C2V) enum_decl( node Node) {
 			c.gen("\t" + name)
 		}
 		// handle custom enum vals, e.g. `MF_SHOOTABLE = 4`
-		if child.inner.len > 0 {
-			 const_expr := child.try_get_next_child() or {
-				println(err)
-				bad_node
-			}
-			if const_expr.kind == .constant_expr {
+		if len(child.inner) > 0 {
+			 const_expr := child.try_get_next_child()
+			if const_expr.kind == constant_expr {
 				c.gen(" = ")
 				c.skip_parens = true
-				c.expr(const_expr.try_get_next_child() or {
-					println(err)
-					bad_node
-				})
+				c.expr(const_expr.try_get_next_child())
 				c.skip_parens = false
 			}
 		} else if has_anon_generated {
@@ -942,7 +975,7 @@ fn ( c C2V) enum_decl( node Node) {
 		}
 	}
 	if enum_name != "" {
-		vprintln("decl enum "${enum_name}" with ${vals.len} vals")
+		vprintln(`decl enum "${enum_name}" with ${vals.len} vals`)
 		c.enum_vals[enum_name] = vals
 		c.genln("}\n")
 	} else {
@@ -953,57 +986,55 @@ fn ( c C2V) enum_decl( node Node) {
 	}
 }
 
-fn ( c C2V) statements( compound_stmt Node) {
+func ( c C2V) statements( compound_stmt Node) {
 	c.indent++
 	// Each CompoundStmt"s child is a statement
-	for i, _ in compound_stmt.inner {
+	for i, _ := range compound_stmt.inner {
 		c.statement( compound_stmt.inner[i])
 	}
 	c.indent--
 	c.genln("}")
 }
 
-fn ( c C2V) statements_no_rcbr( compound_stmt Node) {
-	for i, _ in compound_stmt.inner {
+func ( c C2V) statements_no_rcbr( compound_stmt Node) {
+	for i, _ := range compound_stmt.inner {
 		c.statement( compound_stmt.inner[i])
 	}
 }
 
-fn ( c C2V) statement( child Node) {
-	if child.kindof(.decl_stmt) {
+func ( c *C2V) statement( child Node) {
+	if child.kindof(decl_stmt) {
 		c.var_decl( child)
 		c.genln("")
-	} else if child.kindof(.return_stmt) {
+	} else if child.kindof(return_stmt) {
 		c.return_st( child)
 		c.genln("")
-	} else if child.kindof(.if_stmt) {
+	} else if child.kindof(if_stmt) {
 		c.if_statement( child)
-	} else if child.kindof(.while_stmt) {
+	} else if child.kindof(while_stmt) {
 		c.while_st( child)
-	} else if child.kindof(.for_stmt) {
+	} else if child.kindof(for_stmt) {
 		c.for_st( child)
-	} else if child.kindof(.do_stmt) {
+	} else if child.kindof(do_stmt) {
 		c.do_st( child)
-	} else if child.kindof(.switch_stmt) {
+	} else if child.kindof(switch_stmt) {
 		c.switch_st( child)
-	}
-	// Just  { }
-	else if child.kindof(.compound_stmt) {
+	}	else if child.kindof(compound_stmt) {
+		// Just  { }
 		c.genln("{")
 		c.statements( child)
-	} else if child.kindof(.gcc_asm_stmt) {
+	} else if child.kindof(gcc_asm_stmt) {
 		c.genln("__asm__") // TODO
-	} else if child.kindof(.goto_stmt) {
+	} else if child.kindof(goto_stmt) {
 		c.goto_stmt(child)
-	} else if child.kindof(.label_stmt) {
+	} else if child.kindof(label_stmt) {
 		label := child.name // child.get_val(-1)
 		c.labels[child.name] = child.declaration_id
 		c.genln("/*RRRREG ${child.name} id=${child.declaration_id} */")
 		c.genln("${label}: ")
 		c.statements_no_rcbr( child)
-	}
-	// C++
-	else if child.kindof(.cxx_for_range_stmt) {
+	}	else if child.kindof(cxx_for_range_stmt) {
+		// C++
 		c.for_range(child)
 	} else {
 		c.expr(child)
@@ -1011,7 +1042,7 @@ fn ( c C2V) statement( child Node) {
 	}
 }
 
-fn ( c C2V) goto_stmt(node &Node) {
+func ( c C2V) goto_stmt(node *Node) {
 	 label := c.labels[node.label_id]
 	if label == "" {
 		label = "_GOTO_PLACEHOLDER_" + node.label_id
@@ -1019,15 +1050,12 @@ fn ( c C2V) goto_stmt(node &Node) {
 	c.genln("goto ${label} /* id: ${node.label_id} */")
 }
 
-fn ( c C2V) return_st( node Node) {
+func ( c C2V) return_st( node Node) {
 	c.gen("return ")
 	// returning expression?
 	if node.inner.len > 0 && !c.inside_main {
-		expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
-		if expr.kindof(.implicit_cast_expr) {
+		expr := node.try_get_next_child()
+		if expr.kindof(implicit_cast_expr) {
 			if expr.ast_type.qualified == "bool" {
 				// Handle `return 1` which is actually `return true`
 				c.returning_bool = true
@@ -1038,129 +1066,86 @@ fn ( c C2V) return_st( node Node) {
 	}
 }
 
-fn ( c C2V) if_statement( node Node) {
-	expr := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+func ( c C2V) if_statement( node Node) {
+	expr := node.try_get_next_child()
 	c.gen("if ")
 	c.gen_bool(expr)
 	// Main if block
-	 child := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
-	if child.kindof(.null_stmt) {
+	 child := node.try_get_next_child()
+	if child.kindof(null_stmt) {
 		// The if branch body can be empty (`if (foo) ;`)
 		c.genln(" {/* empty if */}")
 	} else {
 		c.st_block( child)
 	}
 	// Optional else block
-	 else_st := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
-	if else_st.kindof(.compound_stmt) || else_st.kindof(.return_stmt) {
+	 else_st := node.try_get_next_child()
+	if else_st.kindof(compound_stmt) || else_st.kindof(return_stmt) {
 		c.genln("else {")
 		c.st_block_no_start( else_st)
-	}
-	// else if
-	else if else_st.kindof(.if_stmt) {
+	}	else if else_st.kindof(if_stmt) {
 		c.gen("else ")
 		c.if_statement( else_st)
-	}
-	// `else expr() ;` else statement in one line without {}
-	else if !else_st.kindof(.bad) && !else_st.kindof(.null) {
+	}	else if !else_st.kindof(bad) && !else_st.kindof(null) {
+		// `else expr() ;` else statement in one line without {}
 		c.genln("else { // 3")
 		c.expr(else_st)
 		c.genln("\n}")
 	}
 }
 
-fn ( c C2V) while_st( node Node) {
+func ( c C2V) while_st( node Node) {
 	c.gen("for ")
-	expr := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	expr := node.try_get_next_child()
 	c.gen_bool(expr)
 	c.genln(" {")
-	 stmts := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	 stmts := node.try_get_next_child()
 	c.st_block_no_start( stmts)
 }
 
-fn ( c C2V) for_st( node Node) {
+func ( c C2V) for_st( node Node) {
 	c.inside_for = true
 	c.gen("for ")
 	// Can be "for (int i = ...)"
-	if node.has_child_of_kind(.decl_stmt) {
-		 decl_stmt := node.try_get_next_child_of_kind(.decl_stmt) or {
-			println(err)
-			bad_node
-		}
+	if node.has_child_of_kind(decl_stmt) {
+		 decl_stmt := node.try_get_next_child_of_kind(decl_stmt)
 
 		c.var_decl( decl_stmt)
-	}
-	// Or "for (i = ....)"
-	else {
-		expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+	}	else {
+		// Or "for (i = ....)"
+		expr := node.try_get_next_child()
 		c.expr(expr)
 	}
 	c.gen(" ; ")
-	 expr2 := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	 expr2 := node.try_get_next_child()
 	if expr2.kind_str == "" {
 		// second cond can be Null
-		expr2 = node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		expr2 = node.try_get_next_child()
 	}
 	c.expr(expr2)
 	c.gen(" ; ")
-	expr3 := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	expr3 := node.try_get_next_child()
 	c.expr(expr3)
 	c.inside_for = false
-	 child := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	 child := node.try_get_next_child()
 	c.st_block( child)
 }
 
-fn ( c C2V) do_st( node Node) {
+func ( c C2V) do_st( node Node) {
 	c.genln("for {")
-	 child := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	 child := node.try_get_next_child()
 	c.statements_no_rcbr( child)
 	// TODO condition
 	c.genln("// while()")
 	c.gen("if ! (")
-	expr := node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	expr := node.try_get_next_child()
 	c.expr(expr)
 	c.genln(" ) { break }")
 	c.genln("}")
 }
 
-fn ( c C2V) case_st( child Node, is_enum bool) bool {
-	if child.kindof(.case_stmt) {
+func ( c C2V) case_st( child Node, is_enum bool) bool {
+	if child.kindof(case_stmt) {
 		if is_enum {
 			// Force short `.val {` enum syntax, but only in `case .val:`
 			// Later on it"ll be set to false, so that full syntax is used (`Enum.val`)
@@ -1169,47 +1154,29 @@ fn ( c C2V) case_st( child Node, is_enum bool) bool {
 			c.inside_switch_enum = true
 		}
 		c.gen(" ")
-		case_expr := child.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		case_expr := child.try_get_next_child()
 		c.expr(case_expr)
-		 a := child.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
-		if a.kindof(.null) {
-			a = child.try_get_next_child() or {
-				println(err)
-				bad_node
-			}
+		 a := child.try_get_next_child()
+		if a.kindof(null0) {
+			a = child.try_get_next_child()
 		}
 		vprintln("A TYP=${a.ast_type}")
-		if a.kindof(.compound_stmt) {
+		if a.kindof(compound_stmt) {
 			c.genln("// case comp stmt")
 			c.statements( a)
-		} else if a.kindof(.case_stmt) {
+		} else if a.kindof(case_stmt) {
 			// case 1:
 			// case 2:
 			// case 3:
 			// ===>
 			// case 1, 2, 3:
-			for a.kindof(.case_stmt) {
-				e := a.try_get_next_child() or {
-					println(err)
-					bad_node
-				}
+			for a.kindof(case_stmt) {
+				e := a.try_get_next_child()
 				c.gen(", ")
 				c.expr(e) // this is `1` in `case 1:`
-				 tmp := a.try_get_next_child() or {
-					println(err)
-					bad_node
-				}
-				if tmp.kindof(.null) {
-					tmp = a.try_get_next_child() or {
-						println(err)
-						bad_node
-					}
+				 tmp := a.try_get_next_child()
+				if tmp.kindof(null0) {
+					tmp = a.try_get_next_child()
 				}
 				a = tmp
 			}
@@ -1217,16 +1184,15 @@ fn ( c C2V) case_st( child Node, is_enum bool) bool {
 			vprintln("!!!!!!!!caseexpr=")
 			c.inside_switch_enum = false
 			c.statement( a)
-		} else if a.kindof(.default_stmt) {
-		}
-		// case body
-		else {
+		} else if a.kindof(default_stmt) {
+		}		else {
+			// case body
 			c.inside_switch_enum = false
 			c.genln("// case comp body kind=${a.kind} is_enum=${is_enum} ")
 			c.genln("{")
 			c.statement( a)
-			if a.kindof(.return_stmt) {
-			} else if a.kindof(.break_stmt) {
+			if a.kindof(return_stmt) {
+			} else if a.kindof(break_stmt) {
 				return true
 			}
 			if is_enum {
@@ -1238,13 +1204,10 @@ fn ( c C2V) case_st( child Node, is_enum bool) bool {
 }
 
 // Switch statements are a mess in C...
-fn ( c C2V) switch_st( switch_node Node) {
+func ( c C2V) switch_st( switch_node Node) {
 	c.gen("match ")
 	c.inside_switch++
-	 expr := switch_node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	 expr := switch_node.try_get_next_child()
 	 is_enum := false
 	if expr.inner.len > 0 {
 		// 0
@@ -1257,10 +1220,7 @@ fn ( c C2V) switch_st( switch_node Node) {
 			is_enum = true
 		}
 	}
-	 comp_stmt := switch_node.try_get_next_child() or {
-		println(err)
-		bad_node
-	}
+	 comp_stmt := switch_node.try_get_next_child()
 	// Detect if this switch statement runs on an enum (have to look at the first
 	// value being compared). This means that the integer will have to be cast to this enum
 	// in V.
@@ -1270,19 +1230,13 @@ fn ( c C2V) switch_st( switch_node Node) {
 	 second_par := false
 	if comp_stmt.inner.len > 0 {
 		 child := comp_stmt.inner[0]
-		if child.kindof(.case_stmt) {
-			 case_expr := child.try_get_next_child() or {
-				println(err)
-				bad_node
-			}
-			if case_expr.kindof(.constant_expr) {
-				x := case_expr.try_get_next_child() or {
-					println(err)
-					bad_node
-				}
+		if child.kindof(case_stmt) {
+			 case_expr := child.try_get_next_child()
+			if case_expr.kindof(constant_expr) {
+				x := case_expr.try_get_next_child()
 				vprintln("YEP")
 
-				if x.ref_declaration.kind == .enum_constant_decl {
+				if x.ref_declaration.kind == enum_constant_decl {
 					is_enum = true
 					c.inside_switch_enum = true
 					c.gen(c.enum_val_to_enum_name(x.ref_declaration.name))
@@ -1318,18 +1272,15 @@ fn ( c C2V) switch_st( switch_node Node) {
 	//     line3(); // CallExpr (sibling of CaseStmt)
 	// }
 	 has_case := false
-	for i,  child in comp_stmt.inner {
-		if child.kindof(.case_stmt) {
+	for i,  child := range comp_stmt.inner {
+		if child.kindof(case_stmt) {
 			if i > 0 && has_case {
 				c.genln("}")
 			}
 			c.case_st( child, is_enum)
 			has_case = true
-		} else if child.kindof(.default_stmt) {
-			default_node = child.try_get_next_child() or {
-				println(err)
-				bad_node
-			}
+		} else if child.kindof(default_stmt) {
+			default_node = child.try_get_next_child()
 			got_else = true
 		} else {
 			// handle weird children-siblings
@@ -1339,7 +1290,7 @@ fn ( c C2V) switch_st( switch_node Node) {
 	}
 	if got_else {
 		if default_node != bad_node {
-			if default_node.kindof(.case_stmt) {
+			if default_node.kindof(case_stmt) {
 				c.case_st( default_node, is_enum)
 				c.genln("}")
 				c.genln("else {")
@@ -1361,20 +1312,20 @@ fn ( c C2V) switch_st( switch_node Node) {
 	c.inside_switch_enum = false
 }
 
-fn ( c C2V) st_block_no_start( node Node) {
+func ( c C2V) st_block_no_start( node Node) {
 	c.st_block2( node, false)
 }
 
-fn ( c C2V) st_block( node Node) {
+func ( c C2V) st_block( node Node) {
 	c.st_block2( node, true)
 }
 
 // {} or just one statement if there is no {
-fn ( c C2V) st_block2( node Node, insert_start bool) {
+func ( c C2V) st_block2( node Node, insert_start bool) {
 	if insert_start {
 		c.genln(" {")
 	}
-	if node.kindof(.compound_stmt) {
+	if node.kindof(compound_stmt) {
 		c.statements( node)
 	} else {
 		// No {}, just one statement
@@ -1384,19 +1335,16 @@ fn ( c C2V) st_block2( node Node, insert_start bool) {
 }
 
 //
-fn (mut c C2V) gen_bool(node &Node) {
+func ( c *C2V) gen_bool(node *Node) {
 	typ := c.expr(node)
 	if typ == "int" {
 	}
 }
 
-fn (mut c C2V) var_decl(mut decl_stmt Node) {
-	for _ in 0 .. decl_stmt.inner.len {
-		mut var_decl := decl_stmt.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
-		if var_decl.kindof(.record_decl) || var_decl.kindof(.enum_decl) {
+func ( c C2V) var_decl( decl_stmt Node) {
+	for _, _ := range decl_stmt.inner {
+		 var_decl := decl_stmt.try_get_next_child()
+		if var_decl.kindof(record_decl) || var_decl.kindof(enum_decl) {
 			return
 		}
 		if var_decl.class_modifier == "extern" {
@@ -1415,10 +1363,7 @@ fn (mut c C2V) var_decl(mut decl_stmt Node) {
 			c.gen("static ")
 		}
 		if cinit {
-			expr := var_decl.try_get_next_child() or {
-				println(err)
-				bad_node
-			}
+			expr := var_decl.try_get_next_child()
 			c.gen("${name} := ")
 			c.expr(expr)
 			if decl_stmt.inner.len > 1 {
@@ -1426,10 +1371,10 @@ fn (mut c C2V) var_decl(mut decl_stmt Node) {
 			}
 		} else {
 			oldtyp := var_decl.ast_type.qualified
-			mut typ := typ_.name
-			vprintln("oldtyp="${oldtyp}" typ="${typ}"")
+			 typ := typ_.name
+			vprintln(`oldtyp="${oldtyp}" typ="${typ}"`)
 			// set default zero value (V requires initialization)
-			mut def := ""
+			 def := ""
 			if var_decl.ast_type.desugared_qualified.starts_with("struct ") {
 				def = "${typ}{}" // `struct Foo foo;` => `foo := Foo{}` (empty struct init)
 			} else if typ == "u8" {
@@ -1440,7 +1385,7 @@ fn (mut c C2V) var_decl(mut decl_stmt Node) {
 				def = "u32(0)"
 			} else if typ == "u64" {
 				def = "u64(0)"
-			} else if typ in ["size_t", "usize"] {
+			} else if (typ == "size_t") || (typ == "usize") {
 				def = "usize(0)"
 			} else if typ == "i8" {
 				def = "i8(0)"
@@ -1450,7 +1395,7 @@ fn (mut c C2V) var_decl(mut decl_stmt Node) {
 				def = "0"
 			} else if typ == "i64" {
 				def = "i64(0)"
-			} else if typ in ["ptrdiff_t", "isize"] {
+			} else if (typ =="ptrdiff_t") || (typ == "isize") {
 				def = "isize(0)"
 			} else if typ == "bool" {
 				def = "false"
@@ -1465,7 +1410,10 @@ fn (mut c C2V) var_decl(mut decl_stmt Node) {
 				// &sqlite3_mutex{!}
 				// println2("!!! $oldtyp $typ")
 				// def = "&${typ.right(1)}{!}"
-				tt := if typ.starts_with("&") { typ[1..] } else { typ }
+				var tt string
+				if typ.starts_with("&") {
+				tt = typ[1:] } else { 
+				tt = typ }
 				def = "&${tt}(0)"
 			} else if typ.starts_with("[") {
 				// Empty array init
@@ -1493,7 +1441,7 @@ fn (mut c C2V) var_decl(mut decl_stmt Node) {
 	}
 }
 
-fn (mut c C2V) global_var_decl(mut var_decl Node) {
+func ( c C2V) global_var_decl( var_decl Node) {
 	// if the global has children, that means it"s initialized, parse the expression
 	is_inited := var_decl.inner.len > 0
 
@@ -1509,13 +1457,13 @@ fn (mut c C2V) global_var_decl(mut var_decl Node) {
 	if var_decl.name in c.globals {
 		existing := c.globals[var_decl.name]
 		if !types_are_equal(existing.typ, typ.name) {
-			c.verror("Duplicate global "${var_decl.name}" with different types:"${existing.typ}" and	"${typ.name}".
+			c.verror(`Duplicate global "${var_decl.name}" with different types:"${existing.typ}" and	"${typ.name}".
 Since C projects do not use modules but header files, duplicate globals are allowed.
 This will not compile in V, so you will have to modify one of the globals and come up with a
-unique name")
+unique name`)
 		}
 		if !existing.is_extern {
-			c.genln("// skipping global dup "${var_decl.name}"")
+			c.genln(`// skipping global dup "${var_decl.name}"`)
 			return
 		}
 	}
@@ -1524,8 +1472,8 @@ unique name")
 	// and make sure it"s inited (has a child expressinon).
 	is_extern := var_decl.class_modifier == "extern"
 	if is_extern && !is_inited {
-		for x in c.tree.inner {
-			if x.kindof(.var_decl) && x.name == var_decl.name && x.id != var_decl.id {
+		for _,x := range c.tree.inner {
+			if x.kindof(var_decl) && x.name == var_decl.name && x.id != var_decl.id {
 				if x.inner.len > 0 {
 					c.genln("// skipped extern global ${x.name}")
 					return
@@ -1535,8 +1483,8 @@ unique name")
 	}
 	// We assume that if the global"s type is `[N]array`, and it"s initialized,
 	// then it"s constant
-	is_fixed_array := var_decl.ast_type.qualified.contains("]")
-		&& var_decl.ast_type.qualified.contains("]")
+	is_fixed_array := var_decl.ast_type.qualified.contains("]")		&&
+	 var_decl.ast_type.qualified.contains("]")
 	is_const := is_inited && (typ.is_const || is_fixed_array)
 	if true || !typ.name.contains("[") {
 	}
@@ -1554,7 +1502,7 @@ unique name")
 	start := c.out.len
 	if is_const {
 		c.consts << name
-		c.gen("[export:"${name}"]\nconst (\n${name}  ")
+		c.gen(`[export:"${name}"]\nconst (\n${name}  `)
 	} else {
 		if !c.contains_word(name) && !c.cur_file.contains("deh_") { // TODO deh_ hack remove
 			vprintln("RRRR global ${name} not here, skipping")
@@ -1564,7 +1512,7 @@ unique name")
 			// TODO perf right now this searches an entire .c file for each global.
 			return
 		}
-		if name in builtin_global_names {
+		if  name in builtin_global_names {
 			return
 		}
 
@@ -1585,21 +1533,18 @@ unique name")
 		}
 		c.global_struct_init = typ.name
 	}
-	if is_fixed_array && var_decl.ast_type.qualified.contains("[]")
-		&& !var_decl.ast_type.qualified.contains("*") && !is_inited {
+	if is_fixed_array && var_decl.ast_type.qualified.contains("[]")		&&
+	 !var_decl.ast_type.qualified.contains("*") && !is_inited {
 		// Do not allow uninitialized fixed arrays for now, since they are not supported by V
-		eprintln("${c.cur_file}: uninitialized fixed array without the size "${name}" typ="${var_decl.ast_type.qualified}"")
+		eprintln(`${c.cur_file}: uninitialized fixed array without the size "${name}" typ="${var_decl.ast_type.qualified}"`)
 		exit(1)
 	}
 
 	// if the global has children, that means it"s initialized, parse the expression
 	if is_inited {
-		child := var_decl.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		child := var_decl.try_get_next_child()
 		c.gen(" = ")
-		is_struct := child.kindof(.init_list_expr) && !is_fixed_array
+		is_struct := child.kindof(init_list_expr) && !is_fixed_array
 		needs_cast := !is_const && !is_struct // Don't generate `foo=Foo(Foo{` if it"s a struct init
 		if needs_cast {
 			c.gen(typ.name + " (") ///* typ=$typ   KIND= $child.kind isf=$is_fixed_array*/(")
@@ -1628,9 +1573,9 @@ unique name")
 }
 
 // `"red"` => `"Color"`
-fn (c &C2V) enum_val_to_enum_name(enum_val string) string {
+func (c &C2V) enum_val_to_enum_name(enum_val string) string {
 	filtered_enum_val := filter_name(enum_val)
-	for enum_name, vals in c.enum_vals {
+	for enum_name, vals := range c.enum_vals {
 		if filtered_enum_val in vals {
 			return enum_name
 		}
@@ -1640,8 +1585,8 @@ fn (c &C2V) enum_val_to_enum_name(enum_val string) string {
 
 // expr is a spcial one. we dont know what type node has.
 // can be multiple.
-fn (mut c C2V) expr(_node &Node) string {
-	mut node := unsafe { _node }
+func ( c C2V) expr(_node &Node) string {
+	 node := unsafe { _node }
 	// Just gen a number
 	if node.kindof(.null) {
 		return ""
@@ -1665,10 +1610,7 @@ fn (mut c C2V) expr(_node &Node) string {
 	else if node.kindof(.floating_literal) {
 		c.gen(node.value)
 	} else if node.kindof(.constant_expr) {
-		n := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		n := node.try_get_next_child()
 		c.expr(&n)
 	}
 	// null
@@ -1679,27 +1621,15 @@ fn (mut c C2V) expr(_node &Node) string {
 	// = + - *
 	else if node.kindof(.binary_operator) {
 		op := node.opcode
-		mut first_expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		 first_expr := node.try_get_next_child()
 		c.expr(first_expr)
 		c.gen(" ${op} ")
-		mut second_expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		 second_expr := node.try_get_next_child()
 
 		if second_expr.kindof(.binary_operator) && second_expr.opcode == "=" {
 			// handle `a = b = c` => `a = c; b = c;`
-			second_child_expr := second_expr.try_get_next_child() or {
-				println(err)
-				bad_node
-			} // `b`
-			mut third_expr := second_expr.try_get_next_child() or {
-				println(err)
-				bad_node
-			} // `c`
+			second_child_expr := second_expr.try_get_next_child()// `b`
+			 third_expr := second_expr.try_get_next_child()// `c`
 			c.expr(third_expr)
 			c.genln("")
 			c.expr(second_child_expr)
@@ -1719,25 +1649,16 @@ fn (mut c C2V) expr(_node &Node) string {
 	// +=
 	else if node.kindof(.compound_assign_operator) {
 		op := node.opcode // get_val(-3)
-		first_expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		first_expr := node.try_get_next_child()
 		c.expr(first_expr)
 		c.gen(" ${op} ")
-		second_expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		second_expr := node.try_get_next_child()
 		c.expr(second_expr)
 	}
 	// ++ --
 	else if node.kindof(.unary_operator) {
 		op := node.opcode
-		expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		expr := node.try_get_next_child()
 		if op in ["--", "++"] {
 			c.expr(expr)
 			c.gen(" ${op}")
@@ -1756,10 +1677,7 @@ fn (mut c C2V) expr(_node &Node) string {
 		if !c.skip_parens {
 			c.gen("(")
 		}
-		child := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		child := node.try_get_next_child()
 		c.expr(child)
 		if !c.skip_parens {
 			c.gen(")")
@@ -1767,10 +1685,7 @@ fn (mut c C2V) expr(_node &Node) string {
 	}
 	// This junk means go again for its child
 	else if node.kindof(.implicit_cast_expr) {
-		expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		expr := node.try_get_next_child()
 		c.expr(expr)
 	}
 	// var  name
@@ -1789,17 +1704,14 @@ fn (mut c C2V) expr(_node &Node) string {
 			c.gen("c"${no_quotes}"")
 		}
 	}
-	// fn call
+	// func call
 	else if node.kindof(.call_expr) {
-		c.fn_call(mut node)
+		c.func_call( node)
 	}
 	// `user.age`
 	else if node.kindof(.member_expr) {
-		mut field := node.name
-		expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		 field := node.name
+		expr := node.try_get_next_child()
 		c.expr(expr)
 		field = field.replace("->", "")
 		if field.starts_with(".") {
@@ -1814,10 +1726,7 @@ fn (mut c C2V) expr(_node &Node) string {
 		c.gen("sizeof")
 		// sizeof (expr) ?
 		if node.inner.len > 0 {
-			expr := node.try_get_next_child() or {
-				println(err)
-				bad_node
-			}
+			expr := node.try_get_next_child()
 			c.expr(expr)
 		}
 		// sizeof (Type) ?
@@ -1828,17 +1737,11 @@ fn (mut c C2V) expr(_node &Node) string {
 	}
 	// a[0]
 	else if node.kindof(.array_subscript_expr) {
-		first_expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		first_expr := node.try_get_next_child()
 		c.expr(first_expr)
 		c.gen(" [")
 
-		second_expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		second_expr := node.try_get_next_child()
 		c.inside_array_index = true
 		c.expr(second_expr)
 		c.inside_array_index = false
@@ -1846,17 +1749,14 @@ fn (mut c C2V) expr(_node &Node) string {
 	}
 	// int a[] = {1,2,3};
 	else if node.kindof(.init_list_expr) {
-		c.init_list_expr(mut node)
+		c.init_list_expr( node)
 	}
 	// (int*)a  => (int*)(a)
 	// CStyleCastExpr "const char **" <BitCast>
 	else if node.kindof(.c_style_cast_expr) {
-		expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		expr := node.try_get_next_child()
 		typ := convert_type(node.ast_type.qualified)
-		mut cast := typ.name
+		 cast := typ.name
 		if cast.contains("*") {
 			cast = "(${cast})"
 		}
@@ -1867,18 +1767,9 @@ fn (mut c C2V) expr(_node &Node) string {
 	// ? :
 	else if node.kindof(.conditional_operator) {
 		c.gen("if ") // { } else { }")
-		expr := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
-		case1 := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
-		case2 := node.try_get_next_child() or {
-			println(err)
-			bad_node
-		}
+		expr := node.try_get_next_child()
+		case1 := node.try_get_next_child()
+		case2 := node.try_get_next_child()
 		c.expr(expr)
 		c.gen("{ ")
 		c.expr(case1)
@@ -1923,8 +1814,8 @@ fn (mut c C2V) expr(_node &Node) string {
 
 		/*
 		eprintln("parent:")
-		mut i := 0
-		mut cur_node := node
+		 i := 0
+		 cur_node := node
 		for {
 			eprint("parent ${i} :")
 			i++
@@ -1944,7 +1835,7 @@ fn (mut c C2V) expr(_node &Node) string {
 	return node.value // get_val(0)
 }
 
-fn (mut c C2V) name_expr(node &Node) {
+func ( c C2V) name_expr(node &Node) {
 	// `GREEN` => `Color.GREEN`
 	// Find the enum that has this value
 	// vals:
@@ -1953,7 +1844,7 @@ fn (mut c C2V) name_expr(node &Node) {
 
 	if is_enum_val {
 		enum_val := node.ref_declaration.name.to_lower()
-		mut need_full_enum := true // need `Color.green` instead of just `.green`
+		 need_full_enum := true // need `Color.green` instead of just `.green`
 
 		if c.inside_switch != 0 && c.inside_switch_enum {
 			// generate just `match ... { .val { } }`, not `match ... { Enum.val { } }`
@@ -1979,7 +1870,7 @@ fn (mut c C2V) name_expr(node &Node) {
 		}
 	}
 
-	mut name := node.ref_declaration.name
+	 name := node.ref_declaration.name
 
 	if name !in c.consts && name !in c.globals {
 		// Functions and variables are all lowercase in V
@@ -1995,7 +1886,7 @@ fn (mut c C2V) name_expr(node &Node) {
 	}
 }
 
-fn (mut c C2V) init_list_expr(mut node Node) {
+func ( c C2V) init_list_expr( node Node) {
 	t := node.ast_type.qualified
 	// c.gen(" /* list init $t */ ")
 	// C list init can be an array (`numbers = {1,2,3}` => `numbers = [1,2,3]``)
@@ -2007,7 +1898,7 @@ fn (mut c C2V) init_list_expr(mut node Node) {
 		c.gen("[")
 	}
 	if node.array_filler.len > 0 {
-		for i, mut child in node.array_filler {
+		for i,  child in node.array_filler {
 			// array_filler nodes were not handled by set_kind_enum
 			child.initialize_node_and_children()
 
@@ -2020,7 +1911,7 @@ fn (mut c C2V) init_list_expr(mut node Node) {
 			}
 		}
 	} else {
-		for i, mut child in node.inner {
+		for i,  child in node.inner {
 			if child.kind == .bad {
 				child.kind = convert_str_into_node_kind(child.kind_str) // array_filler nodes were not handled by set_kind_enum
 			}
@@ -2049,11 +1940,11 @@ fn (mut c C2V) init_list_expr(mut node Node) {
 	}
 }
 
-fn filter_name(name string) string {
+func filter_name(name string) string {
 	if name in v_keywords {
 		return "${name}_"
 	}
-	if name in builtin_fn_names {
+	if name in builtin_func_names {
 		return "C." + name
 	}
 	if name == "argv" {
@@ -2065,7 +1956,7 @@ fn filter_name(name string) string {
 	return name
 }
 
-fn main() {
+func main() {
 	if os.args.len < 2 {
 		eprintln("Usage:")
 		eprintln("  c2v file.c")
@@ -2075,12 +1966,12 @@ fn main() {
 	}
 	vprintln(os.args.str())
 	is_wrapper := os.args[1] == "wrapper"
-	mut path := os.args.last()
+	 path := os.args.last()
 	if !os.exists(path) {
 		eprintln(""${path}" does not exist")
 		exit(1)
 	}
-	mut c2v := new_c2v(os.args)
+	 c2v := new_c2v(os.args)
 	println("C to V translator ${version}")
 	c2v.translation_start_ticks = time.ticks()
 	if os.is_dir(path) {
@@ -2104,20 +1995,20 @@ fn main() {
 	println("Translated ${c2v.translations:3} files in ${delta_ticks:5} ms.")
 }
 
-fn (mut c2v C2V) translate_file(path string) {
+func ( c2v C2V) translate_file(path string) {
 	start_ticks := time.ticks()
 	print("  translating ${path:-15s} ... ")
 	flush_stdout()
 	c2v.set_config_overrides_for_file(path)
-	mut lines := []string{}
-	mut ast_path := path
+	 lines := []string{}
+	 ast_path := path
 	ext := os.file_ext(path)
 	if path.contains("/src/") {
 		// Hack to fix "doomtype.h" file not found
 		// TODO come up with a better solution
 		work_path := path.before("/src/") + "/src"
 		vprintln(work_path)
-		os.chdir(work_path) or {}
+		os.chdir(work_path)
 	}
 	additional_clang_flags := c2v.get_additional_flags(path)
 	cmd := "${clang} ${additional_clang_flags} -w -Xclang -ast-dump=json -fsyntax-only -fno-diagnostics-color -c ${os.quoted_path(path)}"
@@ -2132,7 +2023,7 @@ fn (mut c2v C2V) translate_file(path string) {
 	}
 	out_ast_dir := os.dir(out_ast)
 	if c2v.is_dir && !os.exists(out_ast_dir) {
-		os.mkdir(out_ast_dir) or { panic(err) }
+		os.mkdir(out_ast_dir)
 	}
 	vprintln("EXT=${ext} out_ast=${out_ast}")
 	vprintln("out_ast=${out_ast}")
@@ -2141,7 +2032,7 @@ fn (mut c2v C2V) translate_file(path string) {
 		eprintln("\nThe file ${path} could not be parsed as a C source file.")
 		exit(1)
 	}
-	lines = os.read_lines(out_ast) or { panic(err) }
+	lines = os.read_lines(out_ast)
 	ast_path = out_ast
 	vprintln("lines.len=${lines.len}")
 	out_v := out_ast.replace(".json", ".v")
@@ -2150,12 +2041,12 @@ fn (mut c2v C2V) translate_file(path string) {
 	c2v.add_file(ast_path, out_v, c_file)
 
 	// preparation pass, fill in the Node redeclarations field:
-	mut seen_ids := map[string]&Node{}
-	for i, mut node in c2v.tree.inner {
+	 seen_ids := map[string]&Node{}
+	for i,  node in c2v.tree.inner {
 		c2v.node_i = i
 		seen_ids[node.id] = unsafe { node }
 		if node.previous_declaration != "" {
-			if mut pnode := seen_ids[node.previous_declaration] {
+			if  pnode := seen_ids[node.previous_declaration] {
 				pnode.redeclarations_count++
 			}
 		}
@@ -2170,7 +2061,7 @@ fn (mut c2v C2V) translate_file(path string) {
 		c2v.print_entire_tree()
 	}
 	if !os.args.contains("-keep_ast") {
-		os.rm(out_ast) or { panic(err) }
+		os.rm(out_ast)
 	}
 	vprintln("DONE!2")
 	c2v.save()
@@ -2179,13 +2070,13 @@ fn (mut c2v C2V) translate_file(path string) {
 	println(" took ${delta_ticks:5} ms ; output .v file: ${short_output_path}")
 }
 
-fn (mut c2v C2V) print_entire_tree() {
+func ( c2v C2V) print_entire_tree() {
 	for _, node in c2v.tree.inner {
 		print_node_recursive(node, 0)
 	}
 }
 
-fn print_node_recursive(node &Node, ident int) {
+func print_node_recursive(node &Node, ident int) {
 	vprint("  ".repeat(ident))
 	vprintln("${node.kind} n="${node.name}"")
 	for child in node.inner {
@@ -2198,8 +2089,8 @@ fn print_node_recursive(node &Node, ident int) {
 	}
 }
 
-fn (mut c C2V) top_level(_node &Node) {
-	mut node := unsafe { _node }
+func ( c C2V) top_level(_node &Node) {
+	 node := unsafe { _node }
 	if node.is_builtin_type {
 		vprintln("is std, ret (name="${node.name}")")
 		return
@@ -2207,33 +2098,33 @@ fn (mut c C2V) top_level(_node &Node) {
 	if node.kindof(.typedef_decl) {
 		c.typedef_decl(node)
 	} else if node.kindof(.function_decl) {
-		c.fn_decl(mut node, "")
+		c.func_decl( node, "")
 	} else if node.kindof(.record_decl) {
 		c.record_decl(node)
 	} else if node.kindof(.var_decl) {
-		c.global_var_decl(mut node)
+		c.global_var_decl( node)
 	} else if node.kindof(.enum_decl) {
-		c.enum_decl(mut node)
+		c.enum_decl( node)
 	} else if !c.cpp_top_level(node) {
 		vprintln("\n\nUnhandled non C++ top level node typ=${node.ast_type}:")
 		exit(1)
 	}
 }
 
-fn (node &Node) get_int_define() string {
+func (node &Node) get_int_define() string {
 	return "HEADER"
 }
 
 // ""struct Foo":"struct Foo""  => "Foo"
-fn parse_c_struct_name(typ string) string {
-	mut res := typ.all_before(":")
+func parse_c_struct_name(typ string) string {
+	 res := typ.all_before(":")
 	res = res.replace("struct ", "")
 	res = res.capitalize() // lowercase structs are stored as is, but need to be capitalized during gen
 	return res
 }
 
-fn trim_underscores(s string) string {
-	mut i := 0
+func trim_underscores(s string) string {
+	 i := 0
 	for i < s.len {
 		if s[i] != `_` {
 			break
@@ -2243,20 +2134,20 @@ fn trim_underscores(s string) string {
 	return s[i..]
 }
 
-fn capitalize_type(s string) string {
-	mut name := s
+func capitalize_type(s string) string {
+	 name := s
 	if name.starts_with("_") {
 		// Trim "_" from the start of the struct name
 		// TODO this can result in conflicts
 		name = trim_underscores(name)
 	}
-	if !name.starts_with("fn ") {
+	if !name.starts_with("func ") {
 		name = name.capitalize()
 	}
 	return name
 }
 
-fn (c &C2V) verror(msg string) {
+func (c &C2V) verror(msg string) {
 	$if linux {
 		eprintln("\x1b[31merror: ${msg}\x1b[0m")
 	} $else {
@@ -2265,36 +2156,36 @@ fn (c &C2V) verror(msg string) {
 	exit(1)
 }
 
-fn (c &C2V) contains_word(word string) bool {
+func (c &C2V) contains_word(word string) bool {
 	return c.c_file_contents.contains(word)
 }
 
-fn (mut c2v C2V) save_globals() {
+func ( c2v C2V) save_globals() {
 	globals_path := c2v.get_globals_path()
-	mut f := os.create(globals_path) or { panic(err) }
+	 f := os.create(globals_path)
 	defer {
 		f.close()
 	}
-	f.writeln("[translated]\n") or { panic(err) }
+	f.writeln("[translated]\n")
 	if c2v.has_cfile {
-		f.writeln("[typedef]\nstruct C.FILE {}") or { panic(err) }
+		f.writeln("[typedef]\nstruct C.FILE {}")
 	}
 	for _, g in c2v.globals_out {
-		f.writeln(g) or { panic(err) }
+		f.writeln(g)
 	}
 }
 
 [if trace_verbose ?]
-fn vprintln(s string) {
+func vprintln(s string) {
 	println(s)
 }
 
 [if trace_verbose ?]
-fn vprint(s string) {
+func vprint(s string) {
 	print(s)
 }
 
-fn types_are_equal(a string, b string) bool {
+func types_are_equal(a string, b string) bool {
 	if a == b {
 		return true
 	}
