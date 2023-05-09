@@ -202,8 +202,6 @@ func (c *C2V) gen(s string) {
 	c.out_line_empty = false
 }
 
-var cvInst *C2V
-
 func vprintln(s string) {
 	// TODO parse variables in string
 	fmt.Printf("%s\n", s)
@@ -291,6 +289,10 @@ func new_c2v(args []string) *C2V {
 	return c2v
 }
 
+func json_decode(content string) *Node {
+	return nil
+}
+
 func (c2v *C2V) add_file(ast_path string, outv string, c_file string) {
 	vprintln("new tree(outv=${outv} c_file=${c_file})")
 
@@ -311,7 +313,7 @@ func (c2v *C2V) add_file(ast_path string, outv string, c_file string) {
 		panic(err)
 	}
 	// TODO parse Json file
-	//c2v.tree = json.decode(Node, ast_txt)
+	c2v.tree = json_decode(ast_txt)
 
 	c2v.outv = outv
 	c2v.c_file_contents = c_file_contents
@@ -334,7 +336,7 @@ func (c2v *C2V) add_file(ast_path string, outv string, c_file string) {
 	// Convert Clang JSON AST nodes to C2V"s nodes with extra info. Skip nodes from libc.
 	set_kind_enum(c2v.tree)
 	for i, node := range c2v.tree.inner {
-		vprintln("\nQQQQ ${i} ${node.name}")
+		vprintln(fmt.Sprintf("\nQQQQ %d %s", i, node.name))
 		// Builtin types have completely empty "loc" objects:
 		// `"loc": {}`
 		// Mark them with `is_std`
@@ -349,17 +351,25 @@ func (c2v *C2V) add_file(ast_path string, outv string, c_file string) {
 		//}
 		vprintln("ADDED TOP NODE line_i=${c2v.line_i}")
 	}
-	if c2v.unhandled_nodes.len > 0 {
+	if len(c2v.unhandled_nodes) > 0 {
 		vprintln("GOT SOME UNHANDLED NODES:")
 		for _, s := range c2v.unhandled_nodes {
 			vprintln(s)
 		}
-		exit(1)
+		panic("Unknown error")
 	}
 }
 
+func ends_with(tofind, keyword string) bool {
+	return strings.HasSuffix(tofind, keyword)
+}
+
 func line_is_source(val string) bool {
-	return val.ends_with(".c")
+	return ends_with(val, ".c")
+}
+
+func replace_str(s, findstr, repstr string) string {
+	return strings.ReplaceAll(s, findstr, repstr)
 }
 
 func (c *C2V) func_call(node Node) {
@@ -367,21 +377,21 @@ func (c *C2V) func_call(node Node) {
 	c.expr(expr) // this is `func_name(`
 	// Clean up macos builtin func names
 	// $if macos
-	is_memcpy := c.cur_out_line.contains("__builtin___memcpy_chk")
-	is_memmove := c.cur_out_line.contains("__builtin___memmove_chk")
-	is_memset := c.cur_out_line.contains("__builtin___memset_chk")
+	is_memcpy := contains_substr(c.cur_out_line, "__builtin___memcpy_chk")
+	is_memmove := contains_substr(c.cur_out_line, "__builtin___memmove_chk")
+	is_memset := contains_substr(c.cur_out_line, "__builtin___memset_chk")
 	if is_memcpy {
-		c.cur_out_line = c.cur_out_line.replace("__builtin___memcpy_chk", "C.memcpy")
+		c.cur_out_line = replace_str(c.cur_out_line, "__builtin___memcpy_chk", "C.memcpy")
 	}
 	if is_memmove {
-		c.cur_out_line = c.cur_out_line.replace("__builtin___memmove_chk", "C.memmove")
+		c.cur_out_line = replace_str(c.cur_out_line, "__builtin___memmove_chk", "C.memmove")
 	}
 	if is_memset {
-		c.cur_out_line = c.cur_out_line.replace("__builtin___memset_chk", "C.memset")
+		c.cur_out_line = replace_str(c.cur_out_line, "__builtin___memset_chk", "C.memset")
 	}
-	if c.cur_out_line.contains("memset") {
+	if contains_substr(c.cur_out_line, "memset") {
 		vprintln("!! ${c.cur_out_line}")
-		c.cur_out_line = c.cur_out_line.replace("memset(", "C.memset(")
+		c.cur_out_line = replace_str(c.cur_out_line, "memset(", "C.memset(")
 	}
 	// Drop last argument if we have memcpy_chk
 	is_m := is_memcpy || is_memmove || is_memset
@@ -389,7 +399,7 @@ func (c *C2V) func_call(node Node) {
 	if is_m {
 		len0 = 3
 	} else {
-		len0 = node.inner.len - 1
+		len0 = len(node.inner) - 1
 	}
 	c.gen("(")
 	for i, arg := range node.inner {
@@ -406,15 +416,31 @@ func (c *C2V) func_call(node Node) {
 	c.gen(")")
 }
 
+func to_lower(s string) string {
+	return strings.ToLower(s)
+}
+
+func before(s, substr string) string {
+	pos := strings.Index(s, substr)
+	if pos == -1 {
+		return s // ???
+	}
+	return s[:pos]
+}
+
+func trim_space(s string) string {
+	return strings.TrimSpace(s)
+}
+
 func (c *C2V) func_decl(node Node, gen_types string) {
 	vprintln("1FN DECL name=" + node.name + " cur_file=" + c.cur_file + "")
 	c.inside_main = false
-	if node.location.file.contains("usr/include") {
+	if contains_substr(node.location.file, "usr/include") {
 		vprintln("\nskipping func:")
 		vprintln("")
 		return
 	}
-	if c.is_dir && c.cur_file.ends_with("/info.c") {
+	if c.is_dir && ends_with(c.cur_file, "/info.c") {
 		// TODO tmp doom hack
 		return
 	}
@@ -428,7 +454,8 @@ func (c *C2V) func_decl(node Node, gen_types string) {
 
 	vprintln("no_stmts: ${no_stmts}")
 	for _, child := range node.inner {
-		vprintln("INNER: ${child.kind} ${child.kind_str}")
+		s := fmt.Sprintf("INNER: %d %s", child.kind, child.kind_str)
+		vprintln(s)
 	}
 	// Skip C++ tmpl args
 	if node.has_child_of_kind(template_argument) {
@@ -449,18 +476,18 @@ func (c *C2V) func_decl(node Node, gen_types string) {
 		// TODO perf right now this searches an entire .c file for each global.
 		return
 	}
-	if node.ast_type.qualified.contains("...)") {
+	if contains_substr(node.ast_type.qualified, "...)") {
 		// TODO handle this better (`...any` ?)
 		c.genln("[c2v_variadic]")
 	}
-	if name.contains("blkcpy") {
+	if contains_substr(name, "blkcpy") {
 		vprintln("GOT FINISH")
 	}
 	if c.is_wrapper {
 		// unsupported
 	}
 	c.fns = append(c.fns, name)
-	typ := node.ast_type.qualified.before("(").trim_space()
+	typ := trim_space(before(node.ast_type.qualified, "("))
 	if typ == "void" {
 		typ = ""
 	} else {
@@ -473,7 +500,7 @@ func (c *C2V) func_decl(node Node, gen_types string) {
 		c.inside_main = true
 		typ = ""
 	}
-	if true || name.contains("Vile") {
+	if true || contains_substr(name, "Vile") {
 		vprintln("\nFN DECL name=" + name + " typ=" + typ + "")
 	}
 
@@ -491,7 +518,7 @@ func (c *C2V) func_decl(node Node, gen_types string) {
 		if c.is_wrapper {
 			//c.genln("func C.${c_name}(${str_args}) ${typ}\n")
 		}
-		v_name := name.to_lower()
+		v_name := to_lower(name)
 		if v_name != c_name && !c.is_wrapper {
 			c.genln(`[c:"${c_name}"]`)
 		}
@@ -508,7 +535,7 @@ func (c *C2V) func_decl(node Node, gen_types string) {
 		} else if c.is_wrapper {
 		}
 	} else {
-		lower := name.to_lower()
+		lower := to_lower(name)
 		if lower != name {
 			// This fixes unknown symbols errors when building separate .c => .v files into .o files
 			// example:
@@ -527,17 +554,17 @@ func (c *C2V) func_decl(node Node, gen_types string) {
 }
 
 func (c *C2V) func_params(node Node) []string {
-	str_args := []string{cap: 5}
+	str_args := []string{}
 	nr_params := node.count_children_of_kind(parm_var_decl)
 	for i := 0; i < nr_params; i++ {
 		param := node.try_get_next_child_of_kind(parm_var_decl)
 
 		arg_typ := convert_type(param.ast_type.qualified)
-		if arg_typ.name.contains("...") {
+		if contains_substr(arg_typ.name, "...") {
 			vprintln("vararg: " + arg_typ.name)
 		}
-		param_name := filter_name(param.name).to_lower()
-		str_args << "${param_name} ${arg_typ.name}"
+		param_name := to_lower(filter_name(param.name))
+		str_args = append(str_args, param_name+" "+arg_typ.name)
 	}
 	return str_args
 }
@@ -545,24 +572,24 @@ func (c *C2V) func_params(node Node) []string {
 // converts a C type to a V type
 func convert_type(typ_ string) Type {
 	typ := typ_
-	if true || typ.contains("type_t") {
+	if true || contains_substr(typ, "type_t") {
 		vprintln(`\nconvert_type("${typ}")`)
 	}
 
-	if typ.contains("__va_list_tag *") {
+	if contains_substr(typ, "__va_list_tag *") {
 		return Type{
 			name: "va_list",
 		}
 	}
 	// TODO DOOM hack
-	typ = typ.replace("fixed_t", "int")
+	typ = replace_str(typ, "fixed_t", "int")
 
-	is_const := typ.contains("const ")
+	is_const := contains_substr(typ, "const ")
 	if is_const {
 	}
-	typ = typ.replace("const ", "")
-	typ = typ.replace("volatile ", "")
-	typ = typ.replace("std::", "")
+	typ = replace_str(typ, "const ", "")
+	typ = replace_str(typ, "volatile ", "")
+	typ = replace_str(typ, "std::", "")
 	if typ == "char **" {
 		return Type{
 			name: "&&u8",
@@ -578,21 +605,21 @@ func convert_type(typ_ string) Type {
 		}
 	} else if typ.starts_with("void *[") {
 		return Type{
-			name: "[" + typ.substr("void *[".len, typ.len-1) + "]voidptr",
+			name: "[" + typ.substr(len("void *["), len(typ)-1) + "]voidptr",
 		}
 	}
 
 	// enum
 	if typ.starts_with("enum ") {
 		return Type{
-			name:     typ.substr("enum ".len, typ.len).capitalize(),
+			name:     typ.substr(len("enum "), typ.len).capitalize(),
 			is_const: is_const,
 		}
 	}
 
 	// int[3]
 	idx := ""
-	if typ.contains("[") && typ.contains("]") {
+	if contains_substr(typ, "[") && contains_substr(typ, "]") {
 		if true {
 			pos := typ.index("[")
 			idx = typ[pos:]
@@ -1039,7 +1066,7 @@ func (c *C2V) enum_decl(node Node) {
 	}
 }
 
-func (c C2V) statements(compound_stmt Node) {
+func (c *C2V) statements(compound_stmt *Node) {
 	c.indent++
 	// Each CompoundStmt"s child is a statement
 	for i, _ := range compound_stmt.inner {
@@ -1049,7 +1076,7 @@ func (c C2V) statements(compound_stmt Node) {
 	c.genln("}")
 }
 
-func (c C2V) statements_no_rcbr(compound_stmt Node) {
+func (c *C2V) statements_no_rcbr(compound_stmt Node) {
 	for i, _ := range compound_stmt.inner {
 		c.statement(compound_stmt.inner[i])
 	}
@@ -1503,6 +1530,10 @@ func contains_any_substr(tofind string, keywords []string) bool {
 		}
 	}
 	return false
+}
+
+func contains_substr(tofind string, keywords string) bool {
+	return strings.Contains(tofind, keywords)
 }
 
 func (c C2V) global_var_decl(var_decl Node) {
