@@ -5,6 +5,56 @@ import (
 	"strings"
 )
 
+func (c *C2V) cpp_top_level(node *Node) bool {
+	println(`C++ top level`)
+	if node.kindof(namespace_decl) {
+		for _, child := range node.inner {
+			c.top_level(child)
+		}
+	} else if node.kindof(cxx_constructor_decl) {
+		c.constructor_decl(node)
+	} else if node.kindof(cxx_destructor_decl) {
+		c.destructor_decl(node)
+	} else if node.kindof(original) {
+	} else if node.kindof(using_decl) {
+	} else if node.kindof(using_shadow_decl) {
+	} else if node.kindof(class_template_decl) {
+		c.class_template_decl(node)
+	} else if node.kindof(class_template_specialization_decl) {
+	} else if node.kindof(cxx_record_decl) {
+	} else if node.kindof(linkage_spec_decl) {
+	} else if node.kindof(using_directive_decl) {
+	} else if node.kindof(class_template_partial_specialization_decl) {
+	} else if node.kindof(function_template_decl) {
+		c.fn_template_decl(node)
+	} else if node.kindof(cxx_method_decl) {
+		c.cxx_method_decl(node)
+	} else {
+		return false
+	}
+	return true
+}
+
+func (c *C2V) constructor_decl(node *Node) {
+
+}
+
+func (c *C2V) destructor_decl(node *Node) {
+
+}
+
+func (c *C2V) class_template_decl(node *Node) {
+
+}
+
+func (c *C2V) fn_template_decl(node *Node) {
+
+}
+
+func (c *C2V) cxx_method_decl(node *Node) {
+
+}
+
 func (c *C2V) for_range(node *Node) {
 	//  node := unsafe { _node }
 	// decl := node.get(DeclStmt)
