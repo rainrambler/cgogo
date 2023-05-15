@@ -60,6 +60,11 @@ type AstJsonType struct {
 	qualified           string // [json: 'qualType']
 }
 
+// ???
+func (p *AstJsonType) str() string {
+	return p.qualified
+}
+
 type RefDeclarationNode struct {
 	kind_str string // [json: 'kind'] // e.g. "IntegerLiteral"
 	name     string
