@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 )
 
 func (c *C2V) cpp_top_level(node *Node) bool {
@@ -55,10 +54,14 @@ func (c *C2V) cxx_method_decl(node *Node) {
 
 }
 
+func (c *C2V) operator_call(node *Node) {
+
+}
+
 func (c *C2V) for_range(node *Node) {
 	//  node := unsafe { _node }
 	// decl := node.get(DeclStmt)
-	stmt := node.inner.last()
+	stmt := node.inner[len(node.inner)-1] // last
 	// decls := node.find_children(DeclStmt)
 	// decl:=decls.last()
 	// var_name :=  j
@@ -78,7 +81,7 @@ func (c *C2V) cpp_expr(_node *Node) bool {
 		// c.genln(node.vals.str())
 		c.genln(`// cxx cons`)
 		typ := node.ast_type.qualified // get_val(-2)
-		if typ.contains(`<int>`) {
+		if contains(typ, `<int>`) {
 			c.gen(`int`)
 		}
 	} else if node.kindof(cxx_member_call_expr) {
@@ -98,7 +101,7 @@ func (c *C2V) cpp_expr(_node *Node) bool {
 			{
 				add_par = true
 				method := replace_str(method_name, `->`, `.`)
-				c.gen(`${method}(`)
+				c.gen(fmt.Sprintf("%s(", method))
 			}
 		}
 		mat_tmp_expr := node.try_get_next_child()
@@ -117,7 +120,7 @@ func (c *C2V) cpp_expr(_node *Node) bool {
 		vprintln(`expr with cle`)
 		typ := node.ast_type.qualified // get_val(-1)
 		vprintln(`TYP=${typ}`)
-		if typ.contains(`basic_string<`) {
+		if contains(typ, `basic_string<`) {
 			// All this for a simple std::string = "hello";
 			construct_expr := node.try_get_next_child_of_kind(cxx_construct_expr)
 
@@ -146,7 +149,7 @@ func (c *C2V) cpp_expr(_node *Node) bool {
 	} else if node.kindof(cxx_dynamic_cast_expr) {
 		typ_ := convert_type(node.ast_type.qualified) // get_val(2))
 		dtyp := typ_.name
-		dtyp = dtyp.replace(`* `, `&`)
+		dtyp = replace(dtyp, `* `, `&`)
 		c.gen(`${dtyp}( `)
 		child := node.try_get_next_child()
 		c.expr(child)
@@ -166,8 +169,7 @@ func (c *C2V) cpp_expr(_node *Node) bool {
 	} else if node.kindof(cxx_static_cast_expr) {
 		// static_cast<int>(a)
 		typ := node.ast_type.qualified // get_val(0)
-		// v := node.vals.join(` `)
-		c.gen(`(${typ})(`)
+		c.gen(fmt.Sprintf("(%s)(", typ))
 		expr := node.try_get_next_child()
 		c.expr(expr)
 		c.gen(`)`)
