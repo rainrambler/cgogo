@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -63,8 +62,8 @@ func repeat(s string, number int) string {
 }
 
 func find_between(s, start, end0 string) string {
-	pos_start := strings.Index(start)
-	pos_end := strings.Index(end0)
+	pos_start := strings.Index(s, start)
+	pos_end := strings.Index(s, end0)
 
 	if pos_start == -1 {
 		return ""
@@ -104,4 +103,8 @@ func starts_with(s, substr string) bool {
 
 func sub_str(s string, startPos, endPos int) string {
 	return s[startPos:endPos]
+}
+
+func quoted_path(path string) string {
+	return `"` + path + `"`
 }
