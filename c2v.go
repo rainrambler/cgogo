@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -128,8 +129,8 @@ type C2V struct {
 	//
 	project_globals_path string // where to store the _globals.v file, that will contain all the globals/consts for the project folder; calculated using project_output_dirname and project_folder
 	//
-	translations            int    // how many translations were done so far
-	translation_start_ticks uint64 // initialised before the loop calling .translate_file()
+	translations            int   // how many translations were done so far
+	translation_start_ticks int64 // initialised before the loop calling .translate_file()
 	has_cfile               bool
 	returning_bool          bool
 }
@@ -2055,7 +2056,8 @@ func (c2v *C2V) translate_file(path string) {
 		os.Chdir(work_path)
 	}
 	additional_clang_flags := c2v.get_additional_flags(path)
-	cmd := "${clang} ${additional_clang_flags} -w -Xclang -ast-dump=json -fsyntax-only -fno-diagnostics-color -c ${os.quoted_path(path)}"
+	cmd := fmt.Sprintf("clang %s -w -Xclang -ast-dump=json "+
+		"-fsyntax-only -fno-diagnostics-color -c %s", additional_clang_flags, quoted_path(path))
 	vprintln("DA CMD")
 	vprintln(cmd)
 	out_ast := ""
@@ -2063,12 +2065,13 @@ func (c2v *C2V) translate_file(path string) {
 	// file.c => file.json
 	out_ast = replace(path, ext, ".json")
 
-	out_ast_dir := os.dir(out_ast)
+	//out_ast_dir := os.dir(out_ast)
 
 	vprintln("EXT=${ext} out_ast=${out_ast}")
 	vprintln("out_ast=${out_ast}")
-	clang_result := os.system("${cmd} > ${out_ast}")
-	if clang_result != 0 {
+	clang_cmd := exec.Command(fmt.Sprintf("%s > %s", cmd, out_ast))
+	clang_result := clang_cmd.Run()
+	if clang_result != nil {
 		eprintln("\nThe file ${path} could not be parsed as a C source file.")
 		// TODO exit or return?
 		return
@@ -2078,7 +2081,8 @@ func (c2v *C2V) translate_file(path string) {
 	ast_path = out_ast
 	vprintln(fmt.Sprintf("lines.len=%d", len(lines)))
 	out_v := replace(out_ast, ".json", ".v")
-	short_output_path := replace(out_v, os.getwd()+"/", "")
+	rootdir, _ := os.Getwd()
+	short_output_path := replace(out_v, rootdir+"/", "")
 	c_file := path
 	c2v.add_file(ast_path, out_v, c_file)
 
@@ -2100,12 +2104,14 @@ func (c2v *C2V) translate_file(path string) {
 		c2v.node_i = i
 		c2v.top_level(node)
 	}
-	if os.args.contains("-print_tree") {
-		c2v.print_entire_tree()
-	}
-	if !os.args.contains("-keep_ast") {
-		os.rm(out_ast)
-	}
+	/*
+		if os.args.contains("-print_tree") {
+			c2v.print_entire_tree()
+		}
+		if !os.args.contains("-keep_ast") {
+			os.rm(out_ast)
+		}
+	*/
 	vprintln("DONE!2")
 	c2v.save()
 	c2v.translations++
@@ -2200,15 +2206,17 @@ func (c *C2V) contains_word(word string) bool {
 
 func (c2v *C2V) save_globals() {
 	globals_path := c2v.get_globals_path()
-	f := os.create(globals_path)
-	defer f.close()
-	f.writeln("[translated]\n")
+	lines := []string{}
+
+	lines = append(lines, "[translated]\n")
 	if c2v.has_cfile {
-		f.writeln("[typedef]\nstruct C.FILE {}")
+		lines = append(lines, "[typedef]\nstruct C.FILE {}")
 	}
 	for _, g := range c2v.globals_out {
-		f.writeln(g)
+		lines = append(lines, g)
 	}
+
+	WriteLines(lines, globals_path)
 }
 
 func types_are_equal(a string, b string) bool {
