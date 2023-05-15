@@ -12,3 +12,7 @@ func get_sdl_cflags() string {
 func (c2v *C2V) get_additional_flags(path0 string) string {
 	return ""
 }
+
+func (c2v *C2V) get_globals_path() string {
+	return c2v.project_globals_path
+}
