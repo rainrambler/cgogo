@@ -219,6 +219,11 @@ func vprintln(s string) {
 	fmt.Printf("%s\n", s)
 }
 
+func vprint(s string) {
+	// TODO parse variables in string
+	fmt.Printf("%s", s)
+}
+
 func eprintln(s string) {
 	// TODO parse variables in string
 	fmt.Printf("%s\n", s)
@@ -281,9 +286,6 @@ func (c *C2V) save() {
 func set_kind_enum(n *Node) {
 	for _, child := range n.inner {
 		child.kind = convert_str_into_node_kind(child.kind_str)
-		// unsafe {
-		// child.parent_node = n
-		//}
 		if child.ref_declaration.kind_str != "" {
 			child.ref_declaration.kind = convert_str_into_node_kind(child.ref_declaration.kind_str)
 		}
@@ -452,7 +454,7 @@ func join_strs(arr []string, deli string) string {
 	return s
 }
 
-func (c *C2V) func_decl(node Node, gen_types string) {
+func (c *C2V) func_decl(node *Node, gen_types string) {
 	vprintln("1FN DECL name=" + node.name + " cur_file=" + c.cur_file + "")
 	c.inside_main = false
 	if contains_substr(node.location.file, "usr/include") {
@@ -574,7 +576,7 @@ func (c *C2V) func_decl(node Node, gen_types string) {
 	vprintln("END OF FN DECL ast line=${c.line_i}")
 }
 
-func (c *C2V) func_params(node Node) []string {
+func (c *C2V) func_params(node *Node) []string {
 	str_args := []string{}
 	nr_params := node.count_children_of_kind(parm_var_decl)
 	for i := 0; i < nr_params; i++ {
@@ -1024,7 +1026,7 @@ func (c *C2V) in_consts(s string) bool {
 	return false
 }
 
-func (c *C2V) enum_decl(node Node) {
+func (c *C2V) enum_decl(node *Node) {
 	// Hack: typedef with the actual enum name is next, parse it and generate "enum NAME {" first
 	enum_name := node.name //""
 	if len(c.tree.inner) > c.node_i+1 {
@@ -1899,23 +1901,6 @@ func (c *C2V) expr(_node *Node) string {
 
 		eprintln(node.str())
 
-		/*
-			eprintln("parent:")
-			 i := 0
-			 cur_node := node
-			for {
-				eprint("parent ${i} :")
-				i++
-				cur_node = node.parent_node
-				eprintln(cur_node.name)
-				unsafe {
-					if cur_node == nil || i > 300 {
-						break
-					}
-				}
-			}
-		*/
-
 		//print_backtrace()
 		panic(1)
 	}
@@ -2074,17 +2059,12 @@ func (c2v *C2V) translate_file(path string) {
 	vprintln("DA CMD")
 	vprintln(cmd)
 	out_ast := ""
-	if c2v.is_dir {
-		out_ast = os.getwd() + "/" + (os.dir(os.dir(path)) + "/${c2v.project_output_dirname}/" +
-			os.base(replace(path, ext, ".json")))
-	} else {
-		// file.c => file.json
-		out_ast = replace(path, ext, ".json")
-	}
+
+	// file.c => file.json
+	out_ast = replace(path, ext, ".json")
+
 	out_ast_dir := os.dir(out_ast)
-	if c2v.is_dir && !os.exists(out_ast_dir) {
-		os.Mkdir(out_ast_dir)
-	}
+
 	vprintln("EXT=${ext} out_ast=${out_ast}")
 	vprintln("out_ast=${out_ast}")
 	clang_result := os.system("${cmd} > ${out_ast}")
@@ -2096,7 +2076,7 @@ func (c2v *C2V) translate_file(path string) {
 	}
 	lines, _ = ReadLines(out_ast)
 	ast_path = out_ast
-	vprintln("lines.len=${lines.len}")
+	vprintln(fmt.Sprintf("lines.len=%d", len(lines)))
 	out_v := replace(out_ast, ".json", ".v")
 	short_output_path := replace(out_v, os.getwd()+"/", "")
 	c_file := path
@@ -2129,7 +2109,7 @@ func (c2v *C2V) translate_file(path string) {
 	vprintln("DONE!2")
 	c2v.save()
 	c2v.translations++
-	delta_ticks := time.Now() - start_ticks
+	delta_ticks := time.Now().Sub(start_ticks)
 	fmt.Printf("took %f ms ; output .v file: %s\n", delta_ticks, short_output_path)
 	//println(" took ${delta_ticks:5} ms ; output .v file: ${short_output_path}")
 }
@@ -2146,15 +2126,14 @@ func print_node_recursive(node *Node, ident int) {
 	for _, child := range node.inner {
 		print_node_recursive(child, ident+1)
 	}
-	if node.array_filler.len > 0 {
+	if len(node.array_filler) > 0 {
 		for _, child := range node.array_filler {
 			print_node_recursive(child, ident+1)
 		}
 	}
 }
 
-func (c *C2V) top_level(_node *Node) {
-	node := unsafe{_node}
+func (c *C2V) top_level(node *Node) {
 	if node.is_builtin_type {
 		vprintln(`is std, ret (name="${node.name}")`)
 		return
@@ -2171,7 +2150,7 @@ func (c *C2V) top_level(_node *Node) {
 		c.enum_decl(node)
 	} else if !c.cpp_top_level(node) {
 		vprintln("\n\nUnhandled non C++ top level node typ=${node.ast_type}:")
-		exit(1)
+		panic(1)
 	}
 }
 
@@ -2189,8 +2168,8 @@ func parse_c_struct_name(typ string) string {
 
 func trim_underscores(s string) string {
 	i := 0
-	for i < s.len {
-		if s[i] != `_` {
+	for i < len(s) {
+		if s[i:i+1] != `_` {
 			break
 		}
 		i++
@@ -2206,13 +2185,13 @@ func capitalize_type(s string) string {
 		name = trim_underscores(name)
 	}
 	if !starts_with(name, "func ") {
-		name = name.capitalize()
+		name = capitalize(name)
 	}
 	return name
 }
 
 func (c *C2V) verror(msg string) {
-	exit(1)
+	panic(1)
 }
 
 func (c *C2V) contains_word(word string) bool {
