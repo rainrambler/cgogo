@@ -20,7 +20,7 @@ type Node struct {
 	value_number         int         // 		[json: 'value'] 			// For CharacterLiterals, since `value` is a number there, not at string
 	opcode               string      // e.g. "+" in BinaryOperator
 	ast_argument_type    AstJsonType //	[json: 'argType']
-	array_filler         []Node      // for InitListExpr
+	array_filler         []*Node     // for InitListExpr
 	declaration_id       string      //   		[json: 'declId'] 			// for goto labels
 	label_id             string      //	[json: 'targetLabelDeclId'] // for goto statements
 	is_postfix           bool        //	[json: 'isPostfix']
@@ -174,6 +174,11 @@ func line_is_builtin_header(val string) bool {
 func (node *Node) is_invalid_locations() bool {
 	return node.location.file == "" && node.location.line == 0 && node.location.offset == 0 &&
 		node.location.spelling_file.path == "" && node.range0.begin.spelling_file.path == ""
+}
+
+func (node *Node) str() string {
+	// TODO impl
+	return node.name
 }
 
 var builtin_fn_names = map[string]int{
