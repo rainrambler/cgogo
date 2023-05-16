@@ -119,7 +119,7 @@ func (c *C2V) cpp_expr(_node *Node) bool {
 		// std::string s = "HI";
 		vprintln(`expr with cle`)
 		typ := node.ast_type.qualified // get_val(-1)
-		vprintln(`TYP=${typ}`)
+		vprintf(`TYP=%v\n`, typ)
 		if contains(typ, `basic_string<`) {
 			// All this for a simple std::string = "hello";
 			construct_expr := node.try_get_next_child_of_kind(cxx_construct_expr)
