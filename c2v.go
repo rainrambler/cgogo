@@ -220,6 +220,11 @@ func vprintln(s string) {
 	fmt.Printf("%s\n", s)
 }
 
+func vprintf(format string, a ...any) {
+	// TODO parse variables in string
+	fmt.Printf(format, a...)
+}
+
 func vprint(s string) {
 	// TODO parse variables in string
 	fmt.Printf("%s", s)
@@ -255,13 +260,13 @@ func (p *os_file) close() {
 func (c *C2V) save() {
 	vprintln("\n\n")
 	s := c.out.str()
-	vprintln("VVVV len=${c.labels.len}")
+	vprintf("VVVV len=%d\n", len(c.labels))
 	vprintln(map2str(c.labels))
 	// If there are goto statements, replace all placeholders with actual `goto label_name;`
 	// Because JSON AST doesn't have label names for some reason, just IDs.
 	if len(c.labels) > 0 {
 		for label_name, label_id := range c.labels {
-			vprintln(`${label_id}" => "${label_name}`)
+			vprintf(`%v" => "%v\n`, label_id, label_name)
 			s = strings.ReplaceAll(s, "_GOTO_PLACEHOLDER_"+label_id, label_name)
 		}
 	}
@@ -309,7 +314,7 @@ func json_decode(content string) *Node {
 }
 
 func (c2v *C2V) add_file(ast_path string, outv string, c_file string) {
-	vprintln("new tree(outv=${outv} c_file=${c_file})")
+	vprintf("new tree(outv=%v c_file=%s)\n", outv, c_file)
 
 	c_file_contents := ""
 	if c_file == "" {
@@ -351,20 +356,20 @@ func (c2v *C2V) add_file(ast_path string, outv string, c_file string) {
 	// Convert Clang JSON AST nodes to C2V's nodes with extra info. Skip nodes from libc.
 	set_kind_enum(c2v.tree)
 	for i, node := range c2v.tree.inner {
-		vprintln(fmt.Sprintf("\nQQQQ %d %s", i, node.name))
+		vprintf("\nQQQQ %d %s", i, node.name)
 		// Builtin types have completely empty "loc" objects:
 		// `"loc": {}`
 		// Mark them with `is_std`
 		if node.is_builtin() {
-			vprintln("${c2v.line_i} is_std name=${node.name}")
+			vprintf("%v is_std name=%s\n", c2v.line_i, node.name)
 			node.is_builtin_type = true
 			continue
 		} else if line_is_source(node.location.file) {
-			vprintln("${c2v.line_i} is_source")
+			vprintf("%d is_source\n", c2v.line_i)
 		}
 		// if node.name.contains("mobj_t") {
 		//}
-		vprintln("ADDED TOP NODE line_i=${c2v.line_i}")
+		vprintf("ADDED TOP NODE line_i=%v\n", c2v.line_i)
 	}
 	if len(c2v.unhandled_nodes) > 0 {
 		vprintln("GOT SOME UNHANDLED NODES:")
@@ -397,7 +402,7 @@ func (c *C2V) func_call(node *Node) {
 		c.cur_out_line = replace_str(c.cur_out_line, "__builtin___memset_chk", "C.memset")
 	}
 	if contains_substr(c.cur_out_line, "memset") {
-		vprintln("!! ${c.cur_out_line}")
+		vprintf("!! %v\n", c.cur_out_line)
 		c.cur_out_line = replace_str(c.cur_out_line, "memset(", "C.memset(")
 	}
 	// Drop last argument if we have memcpy_chk
@@ -475,7 +480,7 @@ func (c *C2V) func_decl(node *Node, gen_types string) {
 		no_stmts = false
 	}
 
-	vprintln("no_stmts: ${no_stmts}")
+	vprintf("no_stmts: %v\n", no_stmts)
 	for _, child := range node.inner {
 		s := fmt.Sprintf("INNER: %d %s", child.kind, child.kind_str)
 		vprintln(s)
@@ -1552,7 +1557,7 @@ func (c *C2V) global_var_decl(var_decl *Node) {
 	// if the global has children, that means it"s initialized, parse the expression
 	is_inited := len(var_decl.inner) > 0
 
-	vprintln("\nglobal name=${var_decl.name} typ=${var_decl.ast_type.qualified}")
+	vprintf("\nglobal name=%s typ=%v\n", var_decl.name, var_decl.ast_type.qualified)
 	vprintln(var_decl.str())
 
 	name := filter_name(var_decl.name)
@@ -1612,7 +1617,7 @@ unique name`)
 		c.gen(`[export:"${name}"]\nconst (\n${name}  `)
 	} else {
 		if !c.contains_word(name) && !contains(c.cur_file, "deh_") { // TODO deh_ hack remove
-			vprintln("RRRR global ${name} not here, skipping")
+			vprintf("RRRR global %s not here, skipping\n", name)
 			// This global is not found in current .c file, means that it was only
 			// in the include file, so it"s declared and used in some other .c file,
 			// no need to genenerate it here.
@@ -2067,8 +2072,8 @@ func (c2v *C2V) translate_file(path string) {
 
 	//out_ast_dir := os.dir(out_ast)
 
-	vprintln("EXT=${ext} out_ast=${out_ast}")
-	vprintln("out_ast=${out_ast}")
+	vprintf("EXT=%v out_ast=%v\n", ext, out_ast)
+	vprintf("out_ast=%v\n", out_ast)
 	clang_cmd := exec.Command(fmt.Sprintf("%s > %s", cmd, out_ast))
 	clang_result := clang_cmd.Run()
 	if clang_result != nil {
@@ -2079,7 +2084,7 @@ func (c2v *C2V) translate_file(path string) {
 	}
 	lines, _ = ReadLines(out_ast)
 	ast_path = out_ast
-	vprintln(fmt.Sprintf("lines.len=%d", len(lines)))
+	vprintf("lines.len=%d\n", len(lines))
 	out_v := replace(out_ast, ".json", ".v")
 	rootdir, _ := os.Getwd()
 	short_output_path := replace(out_v, rootdir+"/", "")
@@ -2100,7 +2105,8 @@ func (c2v *C2V) translate_file(path string) {
 	}
 	// Main parse loop
 	for i, node := range c2v.tree.inner {
-		vprintln(`\ndoing top node ${i} ${node.kind} name="${node.name}" is_std=${node.is_builtin_type}`)
+		vprintf(`\ndoing top node %d %v name="%s" is_std=%v\n`, i,
+			node.kind, node.name, node.is_builtin_type)
 		c2v.node_i = i
 		c2v.top_level(node)
 	}
@@ -2116,7 +2122,7 @@ func (c2v *C2V) translate_file(path string) {
 	c2v.save()
 	c2v.translations++
 	delta_ticks := time.Now().Sub(start_ticks)
-	fmt.Printf("took %f ms ; output .v file: %s\n", delta_ticks, short_output_path)
+	fmt.Printf("took %d ms ; output .v file: %s\n", delta_ticks.Microseconds(), short_output_path)
 	//println(" took ${delta_ticks:5} ms ; output .v file: ${short_output_path}")
 }
 
@@ -2128,7 +2134,7 @@ func (c2v *C2V) print_entire_tree() {
 
 func print_node_recursive(node *Node, ident int) {
 	vprint(repeat("  ", ident))
-	vprintln(`"${node.kind} n="${node.name}"`)
+	vprintf(`"%v n="%s"`, node.kind, node.name)
 	for _, child := range node.inner {
 		print_node_recursive(child, ident+1)
 	}
@@ -2141,7 +2147,7 @@ func print_node_recursive(node *Node, ident int) {
 
 func (c *C2V) top_level(node *Node) {
 	if node.is_builtin_type {
-		vprintln(`is std, ret (name="${node.name}")`)
+		vprintf(`is std, ret (name="%s")\n`, node.name)
 		return
 	}
 	if node.kindof(typedef_decl) {
@@ -2155,7 +2161,7 @@ func (c *C2V) top_level(node *Node) {
 	} else if node.kindof(enum_decl) {
 		c.enum_decl(node)
 	} else if !c.cpp_top_level(node) {
-		vprintln("\n\nUnhandled non C++ top level node typ=${node.ast_type}:")
+		vprintf("\n\nUnhandled non C++ top level node typ=%v:\n", node.ast_type)
 		panic(1)
 	}
 }
